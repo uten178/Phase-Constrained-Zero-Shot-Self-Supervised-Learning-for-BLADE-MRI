@@ -329,53 +329,6 @@ class getDataTerm_AhAx(tf.keras.layers.Layer):
 from tensorflow.keras import layers
 ###############################################################################
 
-def residual_dense_block(input_tensor, growth_rate, num_layers):
-    x = input_tensor
-    concat_features = [x]
-    for _ in range(num_layers):
-        x = layers.Conv2D(growth_rate, (3, 3), padding='same', activation='relu')(x)
-        concat_features.append(x)
-        x = layers.Concatenate()(concat_features)
-    # Local Feature Fusion
-    x = layers.Conv2D(growth_rate, (1, 1), padding='same')(x)
-    return x
-
-def residual_dense_network(input_shape, out_ch, growth_rate, num_rdb, num_layers_per_rdb,last_filt):# growth_rate=64, num_rdb=5, num_layers_per_rdb=4)
-    """
-    Creates a Residual Dense Network with ~10M parameters.
-
-    Args:
-        input_shape (tuple): Shape of the input tensor (H, W, C).
-        growth_rate (int): Number of filters in each dense block.
-        num_rdb (int): Number of residual dense blocks.
-        num_layers_per_rdb (int): Number of layers in each residual dense block.
-
-    Returns:
-        model (tf.keras.Model): Compiled Residual Dense Network model.
-    """
-    inputs = layers.Input(shape=input_shape)
-
-    # Initial Convolution
-    x = layers.Conv2D(growth_rate, (3, 3), padding='same', activation='relu')(inputs)
-    initial_conv = x
-
-    # Residual Dense Blocks
-    for _ in range(num_rdb):
-        rdb_output = residual_dense_block(x, growth_rate, num_layers_per_rdb)
-        x = layers.Add()([x, rdb_output])  # Residual connection
-
-    # Global Feature Fusion
-    x = layers.Conv2D(growth_rate, (1, 1), padding='same')(x)
-    x = layers.Add()([initial_conv, x])  # Residual connection
-
-    # Final Convolution
-    outputs = layers.Conv2D(out_ch, (last_filt, last_filt), padding='same')(x)
-
-    model = Model(inputs, outputs)
-
-    return model
-##########################################
-
 #########################################
 def UNet(input_shape=(320, 320, 4), out_ch=4, last_filt=3, use_skip=True, use_add=True):
     inputs = tf.keras.Input(shape=input_shape)
@@ -487,34 +440,6 @@ def cg(H, b, x0=None, Nit=5, tol=0.0, eps=1e-15):
     
 #####################################################################################
 
-class ScalarParam(layers.Layer):
-    """Trainable scalar with optional bounds; calling it scales its input."""
-    def __init__(self, init=0.05, lb=None, ub=None, name="lam", **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.lb, self.ub = lb, ub
-        self.init = float(init)
-
-    def build(self, _):
-        self.w = self.add_weight(
-            name=f"{self.name}_w",
-            shape=(),
-            initializer=tf.keras.initializers.Constant(self.init),
-            trainable=True, dtype=tf.float32
-        )
-
-    def value(self):
-        v = self.w
-        if self.lb is not None and self.ub is not None:
-            v = self.lb + (self.ub - self.lb) * tf.sigmoid(v)  # keep in (lb,ub)
-        return v
-
-    def call(self, x):
-        v = self.value()
-        if x.dtype.is_complex:
-            v = tf.complex(v, tf.zeros_like(v))
-        return x * v
-#####################################################################################
-
 class UnrolledNet:
     def __init__(self, num_rows, num_cols, num_coils, num_blades, B1, B2):
         self.num_rows = num_rows
@@ -546,7 +471,6 @@ class UnrolledNet:
 
         GD_step_size1 = 0.4
         GD_step_size2 = 0.15
-
             
         # Compute right-hand side (A^H y)
         x = AH_propeller(kdata_T,K_coord,csm,kmask_T,self.num_blades)    
@@ -591,8 +515,7 @@ class UnrolledNet:
           GD_grad = Subtract()([AhAx, Ahb])
           temp = Lambda(lambda x: x * GD_step_size2)(GD_grad)
           #temp = self.lam2(GD_grad)
-               
-          
+                         
           x_GD = Subtract()([x, temp])
 
           # Run U-Nets
@@ -618,8 +541,8 @@ num_cols = 320
 num_coils = 8
 num_blades = 20
 num_batchs = 1
-B1 = 1
-B2 = 1
+B1 = 2
+B2 = 4
 
 # ####################################################
 # Angle = np.linspace(0, 180-1, 180)*np.pi/180
@@ -917,40 +840,5 @@ sio.savemat(os.path.join(data_path, 'Recon_DL_V4/Final/ReconDL_Step015_AX_8Blade
 # plt.imshow(np.fliplr(np.flipud(np.rot90(np.abs(x[0,:, :,7]), k=-1))), cmap='gray')#,vmin = 0.01, vmax = 0.3)
 # plt.axis('off')  # optional: hide axis ticks
 # plt.show()
-
-# def generate_blade_trajactory(N, num_blades):
-
-#     Angle = np.linspace(0, np.pi, num_blades,endpoint=False)
-        
-#     x = np.linspace(0, N-1, N)
-#     y = np.linspace(0, N-1, N)
-    
-#     kx_base,ky_base = np.meshgrid(x,y)
-    
-#     kx_base=-(kx_base/N)+0.5;
-#     ky_base=-(ky_base/N)+0.5;
-    
-#     k_traj = []
-    
-#     for it in range(num_blades):
-        
-#         angle = Angle[it]
-    
-#         xo=np.cos(angle)*kx_base+np.sin(angle)*ky_base;
-#         yo=np.cos(angle)*ky_base-np.sin(angle)*kx_base;
-    
-#         kx = xo.flatten()
-#         ky = yo.flatten()
-#         ktraj = np.stack((-ky, -kx), axis=0)*2*np.pi
-#     # convert k-space trajectory to a tensor and unsqueeze batch dimension
-#         #ktraj = tf.convert_to_tensor(ktraj)[None, ...]
-#     # create NUFFT objects, use 'ortho' for orthogonal FFTs
-#         k_traj.append(ktraj)
-    
-#     k_traj = tf.stack(k_traj,axis=-1)
-    
-#     return k_traj
-
-
 
   
